@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Acceso RFID</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-gray-800 to-black text-gray-100 min-h-screen">
+    <div id="root"></div>
+
+    <script>
+        // CONFIGURACIÓN FIREBASE - REEMPLAZAR CON TUS DATOS
+        const firebaseConfig = {
+            apiKey: "AIzaSyCerOP8RocofUkijggu82bK-PQKRAWorzc",
+            authDomain: "rfid-web-81385.firebaseapp.com",
+            databaseURL: "https://rfid-web-81385-default-rtdb.firebaseio.com",
+            projectId: "rfid-web-81385",
+            storageBucket: "rfid-web-81385.firebasestorage.app",
+            messagingSenderId: "865645373556",
+            appId: "1:865645373556:web:4a5a3e3738398ce2cf4921",
+            measurementId: "G-8BC0Y570WN"
+        };
+
+        // Inicializar Firebase
+        try {
+            firebase.initializeApp(firebaseConfig);
+            var database = firebase.database();
+        } catch (error) {
+            console.error("Error inicializando Firebase:", error);
+            alert("Error de configuración de Firebase. Por favor verifica tus credenciales.");
+        }
+
+        // Variables globales
+        let doorStatus = 'locked';
+        let users = [];
+        let accessLogs = [];
+
+        // Referencias Firebase
+        const doorRef = database.ref('door');
+        const usersRef = database.ref('users');
+        const logsRef = database.ref('accessLogs');
+
+        // Escuchar cambios en tiempo real
+        doorRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                doorStatus = data.status || 'locked';
+                updateUI();
+            }
+        });
+
+        usersRef.on('value', (snapshot) => {
+            users = [];
+            const data = snapshot.val();
+            if (data) {
+                Object.keys(data).forEach(key => {
+                    users.push({ id: key, ...data[key] });
+                });
+                updateUI();
+            }
+        });
+
+        logsRef.orderByChild('timestampUnix').limitToLast(50).on('value', (snapshot) => {
+            accessLogs = [];
+            const data = snapshot.val();
+            if (data) {
+                Object.keys(data).forEach(key => {
+                    accessLogs.push({ id: key, ...data[key] });
+                });
+                accessLogs.reverse();
+                updateUI();
+            }
+        });
+
+        // Funciones de control
+        function toggleDoor() {
+            const newStatus = doorStatus === 'locked' ? 'unlocked' : 'locked';
+            const command = newStatus === 'unlocked' ? 'open' : 'close';
+            
+            doorRef.update({
+                remoteCommand: command,
+                status: newStatus,
+                lastUpdate: Date.now()
+            }).catch(error => {
+                console.error("Error al actualizar puerta:", error);
+                alert("Error al cambiar el estado de la puerta");
+            });
+        }
+
+        function addUser() {
+            const name = document.getElementById('userName').value.trim();
+            const rfid = document.getElementById('userRFID').value.trim();
+            
+            if (!name || !rfid) {
+                alert('Por favor completa todos los campos');
+                return;
+            }
+
+            if (rfid.length < 4) {
+                alert('El RFID debe tener al menos 4 caracteres');
+                return;
+            }
+
+            // Verificar si el RFID ya existe
+            const rfidExists = users.some(user => user.rfid === rfid.toUpperCase());
+            if (rfidExists) {
+                alert('Este RFID ya está registrado');
+                return;
+            }
+            
+            const newUserRef = usersRef.push();
+            newUserRef.set({
+                name: name,
+                rfid: rfid.toUpperCase(),
+                authorized: true,
+                createdAt: Date.now()
+            }).then(() => {
+                document.getElementById('userName').value = '';
+                document.getElementById('userRFID').value = '';
+                
+                // Registrar en log
+                logsRef.push({
+                    user: name,
+                    rfid: rfid.toUpperCase(),
+                    action: 'Usuario Registrado',
+                    status: 'info',
+                    timestamp: new Date().toLocaleString('es-ES'),
+                    timestampUnix: Date.now()
+                });
+            }).catch(error => {
+                console.error("Error al agregar usuario:", error);
+                alert("Error al registrar usuario");
+            });
+        }
+
+        function toggleUserAuth(userId, currentAuth) {
+            usersRef.child(userId).update({
+                authorized: !currentAuth,
+                lastModified: Date.now()
+            }).catch(error => {
+                console.error("Error al actualizar autorización:", error);
+                alert("Error al cambiar autorización");
+            });
+        }
+
+        function deleteUser(userId) {
+            if (confirm('¿Estás seguro de eliminar este usuario?')) {
+                usersRef.child(userId).remove().catch(error => {
+                    console.error("Error al eliminar usuario:", error);
+                    alert("Error al eliminar usuario");
+                });
+            }
+        }
+
+        // Función para escapar HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Actualizar interfaz
+        function updateUI() {
+            const root = document.getElementById('root');
+            
+            const doorLockIcon = doorStatus === 'locked' ? '🔒' : '🔓';
+            const doorLockClass = doorStatus === 'locked' ? 'bg-red-500/20 border-4 border-red-500' : 'bg-green-500/20 border-4 border-green-500';
+            const doorStatusText = doorStatus === 'locked' ? 'CERRADA' : 'ABIERTA';
+            const doorStatusClass = doorStatus === 'locked' ? 'text-red-400' : 'text-green-400';
+            const doorButtonClass = doorStatus === 'locked' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700';
+            const doorButtonText = doorStatus === 'locked' ? '🔓 Abrir Puerta' : '🔒 Cerrar Puerta';
+
+            let usersHTML = '';
+            if (users.length === 0) {
+                usersHTML = '<div class="text-center py-8 text-gray-500">No hay usuarios registrados</div>';
+            } else {
+                usersHTML = users.map(user => {
+                    const authBadgeClass = user.authorized ? 'bg-green-500/20 text-green-400 border border-green-500/50' : 'bg-red-500/20 text-red-400 border border-red-500/50';
+                    const authBadgeText = user.authorized ? '✓ Autorizado' : '✗ No Autorizado';
+                    const authButtonText = user.authorized ? 'Revocar' : 'Autorizar';
+                    
+                    return `
+                        <div class="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                            <div class="flex items-center justify-between flex-wrap gap-3">
+                                <div class="flex-1 min-w-[200px]">
+                                    <h4 class="font-semibold">${escapeHtml(user.name)}</h4>
+                                    <p class="text-sm text-gray-400">RFID: ${escapeHtml(user.rfid)}</p>
+                                </div>
+                                <div class="flex items-center gap-3 flex-wrap">
+                                    <span class="px-3 py-1 rounded-full text-xs font-semibold ${authBadgeClass}">
+                                        ${authBadgeText}
+                                    </span>
+                                    <button onclick="toggleUserAuth('${user.id}', ${user.authorized})" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm transition-colors">
+                                        ${authButtonText}
+                                    </button>
+                                    <button onclick="deleteUser('${user.id}')" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-sm transition-colors">
+                                        Eliminar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            let logsHTML = '';
+            if (accessLogs.length === 0) {
+                logsHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-500">No hay registros</td></tr>';
+            } else {
+                logsHTML = accessLogs.map(log => {
+                    let statusBadgeClass = 'bg-blue-500/20 text-blue-400 border border-blue-500/50';
+                    let statusText = 'ℹ Info';
+                    
+                    if (log.status === 'success') {
+                        statusBadgeClass = 'bg-green-500/20 text-green-400 border border-green-500/50';
+                        statusText = '✓ Exitoso';
+                    } else if (log.status === 'error') {
+                        statusBadgeClass = 'bg-red-500/20 text-red-400 border border-red-500/50';
+                        statusText = '✗ Denegado';
+                    }
+                    
+                    return `
+                        <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                            <td class="py-3 px-4 text-gray-300">${escapeHtml(log.timestamp || '')}</td>
+                            <td class="py-3 px-4 text-gray-300">${escapeHtml(log.user || 'N/A')}</td>
+                            <td class="py-3 px-4 text-gray-400 text-sm">${escapeHtml(log.rfid || 'N/A')}</td>
+                            <td class="py-3 px-4 text-gray-300">${escapeHtml(log.action || 'N/A')}</td>
+                            <td class="py-3 px-4">
+                                <span class="px-3 py-1 rounded-full text-xs font-semibold ${statusBadgeClass}">
+                                    ${statusText}
+                                </span>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+            
+            root.innerHTML = `
+                <div class="max-w-7xl mx-auto p-6">
+                    <div class="mb-8">
+                        <h1 class="text-4xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent mb-2">
+                            🔒 Sistema de Control de Acceso RFID
+                        </h1>
+                        <p class="text-gray-400">Monitoreo en tiempo real con Firebase</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                        <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 border border-gray-700">
+                            <h2 class="text-xl font-semibold mb-4">Estado de la Puerta</h2>
+                            <div class="flex flex-col items-center py-8">
+                                <div class="w-32 h-32 rounded-full flex items-center justify-center mb-6 ${doorLockClass}">
+                                    <span class="text-6xl">${doorLockIcon}</span>
+                                </div>
+                                <h3 class="text-2xl font-bold mb-4 ${doorStatusClass}">
+                                    ${doorStatusText}
+                                </h3>
+                                <button onclick="toggleDoor()" class="${doorButtonClass} px-8 py-3 rounded-lg font-semibold transition-all">
+                                    ${doorButtonText}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="lg:col-span-2 bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 border border-gray-700">
+                            <h2 class="text-xl font-semibold mb-4">👥 Gestión de Usuarios</h2>
+                            
+                            <div class="bg-gray-800/50 rounded-lg p-4 mb-4 border border-gray-700">
+                                <h3 class="text-sm font-semibold text-gray-300 mb-3">Registrar Nuevo Usuario</h3>
+                                <div class="flex gap-3 flex-wrap">
+                                    <input id="userName" type="text" placeholder="Nombre" class="flex-1 min-w-[200px] bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:border-cyan-500">
+                                    <input id="userRFID" type="text" placeholder="RFID Tag (ej: A1B2C3D4)" class="flex-1 min-w-[200px] bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:border-cyan-500">
+                                    <button onclick="addUser()" class="bg-cyan-600 hover:bg-cyan-700 px-6 py-2 rounded-lg font-semibold transition-colors">
+                                        Agregar
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="space-y-2 max-h-64 overflow-y-auto">
+                                ${usersHTML}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 border border-gray-700">
+                        <h2 class="text-xl font-semibold mb-4">📋 Registro de Accesos</h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="border-b border-gray-700">
+                                        <th class="text-left py-3 px-4 text-gray-400">Fecha y Hora</th>
+                                        <th class="text-left py-3 px-4 text-gray-400">Usuario</th>
+                                        <th class="text-left py-3 px-4 text-gray-400">RFID</th>
+                                        <th class="text-left py-3 px-4 text-gray-400">Acción</th>
+                                        <th class="text-left py-3 px-4 text-gray-400">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${logsHTML}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Permitir agregar usuario con Enter
+        document.addEventListener('DOMContentLoaded', function() {
+            updateUI();
+        });
+
+        // Inicializar
+        updateUI();
+    </script>
+</body>
+</html>
