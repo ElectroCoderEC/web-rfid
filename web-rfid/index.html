@@ -39,9 +39,9 @@
         let accessLogs = [];
 
         // Referencias Firebase
-        const doorRef = database.ref('door');
-        const usersRef = database.ref('users');
-        const logsRef = database.ref('accessLogs');
+        const doorRef = database.ref('datos/door');
+        const usersRef = database.ref('datos/users');
+        const logsRef = database.ref('datos/accessLogs');
 
         // Escuchar cambios en tiempo real
         doorRef.on('value', (snapshot) => {
