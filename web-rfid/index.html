@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
 </head>
 <body class="bg-gradient-to-br from-gray-900 via-gray-800 to-black text-gray-100 min-h-screen">
     <div id="root"></div>
@@ -38,6 +40,10 @@
         let users = [];
         let accessLogs = [];
 
+        let currentPage = 1;
+        const rowsPerPage = 10;
+
+
         // Referencias Firebase
         const doorRef = database.ref('datos/door');
         const usersRef = database.ref('datos/users');
@@ -63,17 +69,59 @@
             }
         });
 
-        logsRef.orderByChild('timestampUnix').limitToLast(50).on('value', (snapshot) => {
-            accessLogs = [];
-            const data = snapshot.val();
-            if (data) {
-                Object.keys(data).forEach(key => {
-                    accessLogs.push({ id: key, ...data[key] });
-                });
-                accessLogs.reverse();
-                updateUI();
-            }
+        logsRef.orderByChild('timestampUnix').limitToLast(200).on('value', (snapshot) => {
+    accessLogs = [];
+    const data = snapshot.val();
+    if (data) {
+        Object.keys(data).forEach(key => {
+            accessLogs.push({ id: key, ...data[key] });
         });
+
+        // Ordenar: más reciente primero
+        accessLogs.sort((a, b) => b.timestampUnix - a.timestampUnix);
+        currentPage = 1; // siempre volver a la primera página
+    }
+    updateUI();
+});
+
+
+function getPaginatedLogs() {
+    const start = (currentPage - 1) * rowsPerPage;
+    return accessLogs.slice(start, start + rowsPerPage);
+}
+
+function totalPages() {
+    return Math.ceil(accessLogs.length / rowsPerPage);
+}
+
+function clearAccessLogs() {
+    if (confirm('¿Eliminar todos los registros de accesos?')) {
+        logsRef.remove();
+    }
+}
+
+
+function exportLogsExcel() {
+    if (accessLogs.length === 0) {
+        alert('No hay datos para exportar');
+        return;
+    }
+
+    const data = accessLogs.map(log => ({
+        Fecha: log.timestamp || '',
+        Usuario: log.user || '',
+        RFID: log.rfid || '',
+        Acción: log.action || '',
+        Estado: log.status || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'AccessLogs');
+    XLSX.writeFile(workbook, 'registro_accesos.xlsx');
+}
+
+
 
         // Funciones de control
         function toggleDoor() {
@@ -206,37 +254,40 @@
                 }).join('');
             }
 
-            let logsHTML = '';
-            if (accessLogs.length === 0) {
-                logsHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-500">No hay registros</td></tr>';
-            } else {
-                logsHTML = accessLogs.map(log => {
-                    let statusBadgeClass = 'bg-blue-500/20 text-blue-400 border border-blue-500/50';
-                    let statusText = 'ℹ Info';
-                    
-                    if (log.status === 'success') {
-                        statusBadgeClass = 'bg-green-500/20 text-green-400 border border-green-500/50';
-                        statusText = '✓ Exitoso';
-                    } else if (log.status === 'error') {
-                        statusBadgeClass = 'bg-red-500/20 text-red-400 border border-red-500/50';
-                        statusText = '✗ Denegado';
-                    }
-                    
-                    return `
-                        <tr class="border-b border-gray-800 hover:bg-gray-800/50">
-                            <td class="py-3 px-4 text-gray-300">${escapeHtml(log.timestamp || '')}</td>
-                            <td class="py-3 px-4 text-gray-300">${escapeHtml(log.user || 'N/A')}</td>
-                            <td class="py-3 px-4 text-gray-400 text-sm">${escapeHtml(log.rfid || 'N/A')}</td>
-                            <td class="py-3 px-4 text-gray-300">${escapeHtml(log.action || 'N/A')}</td>
-                            <td class="py-3 px-4">
-                                <span class="px-3 py-1 rounded-full text-xs font-semibold ${statusBadgeClass}">
-                                    ${statusText}
-                                </span>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-            }
+            const paginatedLogs = getPaginatedLogs();
+let logsHTML = '';
+
+if (paginatedLogs.length === 0) {
+    logsHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-500">No hay registros</td></tr>';
+} else {
+    logsHTML = paginatedLogs.map(log => {
+        let statusBadgeClass = 'bg-blue-500/20 text-blue-400 border border-blue-500/50';
+        let statusText = 'ℹ Info';
+
+        if (log.status === 'success') {
+            statusBadgeClass = 'bg-green-500/20 text-green-400 border border-green-500/50';
+            statusText = '✓ Exitoso';
+        } else if (log.status === 'error') {
+            statusBadgeClass = 'bg-red-500/20 text-red-400 border border-red-500/50';
+            statusText = '✗ Denegado';
+        }
+
+        return `
+            <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                <td class="py-3 px-4">${escapeHtml(log.timestamp || '')}</td>
+                <td class="py-3 px-4">${escapeHtml(log.user || 'N/A')}</td>
+                <td class="py-3 px-4 text-sm text-gray-400">${escapeHtml(log.rfid || 'N/A')}</td>
+                <td class="py-3 px-4">${escapeHtml(log.action || 'N/A')}</td>
+                <td class="py-3 px-4">
+                    <span class="px-3 py-1 rounded-full text-xs font-semibold ${statusBadgeClass}">
+                        ${statusText}
+                    </span>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
             
             root.innerHTML = `
                 <div class="max-w-7xl mx-auto p-6">
@@ -283,9 +334,42 @@
                         </div>
                     </div>
 
+
                     <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 border border-gray-700">
                         <h2 class="text-xl font-semibold mb-4">📋 Registro de Accesos</h2>
                         <div class="overflow-x-auto">
+
+                            <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
+    <div class="flex gap-2">
+        <button onclick="clearAccessLogs()" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-sm">
+            🗑 Limpiar registros
+        </button>
+        <button onclick="exportLogsExcel()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-sm">
+            📥 Descargar Excel
+        </button>
+    </div>
+
+    <div class="flex items-center gap-3">
+        <button onclick="currentPage=Math.max(1,currentPage-1);updateUI()" 
+            class="bg-gray-700 px-3 py-1 rounded disabled:opacity-40"
+            ${currentPage === 1 ? 'disabled' : ''}>
+            ◀
+        </button>
+
+        <span class="text-sm text-gray-400">
+            Página ${currentPage} / ${totalPages() || 1}
+        </span>
+
+        <button onclick="currentPage=Math.min(totalPages(),currentPage+1);updateUI()" 
+            class="bg-gray-700 px-3 py-1 rounded disabled:opacity-40"
+            ${currentPage >= totalPages() ? 'disabled' : ''}>
+            ▶
+        </button>
+    </div>
+</div>
+
+
+
                             <table class="w-full">
                                 <thead>
                                     <tr class="border-b border-gray-700">
