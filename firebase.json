@@ -1,17 +1,11 @@
 {
   "hosting": {
-    "site": "rfid-web-espoch",
-    "public": "/",
+    "host": "rfid-web-espoch",
+    "public": "public",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
     ]
   }
 }
